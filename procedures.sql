@@ -38,8 +38,11 @@ as
 -- оплата накладной
 
 create or replace procedure process_payment(
-    in_consignment_note_id int,
-    payment_sum numeric(8, 2)
+    in in_consignment_note_id int,
+    in payment_sum numeric(8, 2),
+    in in_customer_id int,
+    inout result varchar(255) = null,
+    inout debt numeric(8, 2) = null
 )
 language plpgsql
 as
@@ -49,15 +52,26 @@ as
         total_consignment_payment_sum numeric(8, 2);
         total_consignment_cost numeric(8, 2);
     begin
+
+        if not exists(select id from consignment_note where id = in_consignment_note_id) then
+            result := 'Consignment note not exists';
+            return;
+        end if;
+
+        if (select customer_id from consignment_note where id = in_consignment_note_id) != in_customer_id then
+            result := 'Wrong customer';
+            return;
+        end if;
+
         if (select cn.payment_document_id is not null from consignment_note cn where cn.id = in_consignment_note_id)
-            then raise exception 'Consignment note has been already fully paid';
+            then
+            result := 'Consignment note is already fully paid';
+            return;
         end if;
 
         insert into "payment_document" (consignment_note_id, payment)
         values (in_consignment_note_id, payment_sum)
         returning id into new_payment_document_id;
-
-        raise notice 'Successfully created new payment document with id %', new_payment_document_id;
 
         select sum(pi.price * cni.ordered) into total_consignment_cost
         from "consignment_note" cn
@@ -82,10 +96,12 @@ as
                 payment_document_id = new_payment_document_id
             where id = in_consignment_note_id;
 
-            raise notice 'Consignment note is fully paid!';
+            result := 'Consignment note is fully paid. Here is your change';
         else
-            raise notice '% left to pay', total_consignment_cost - total_consignment_payment_sum;
+            result := 'Success, left to pay:';
         end if;
+
+        debt := total_consignment_cost - total_consignment_payment_sum;
 
     end
     $$;
@@ -93,9 +109,10 @@ as
 -- поступление товара на склад
 
 create or replace procedure process_supply(
-    in_good_id int, -- may be null when supplying a new good
-    in_quantity int,
-    in_name varchar(255) = null
+    in in_good_id int, -- may be null when supplying a new good
+    in in_quantity int,
+    in in_name varchar(255) = null,
+    inout count int = 0
 )
 language plpgsql
 as
@@ -128,6 +145,8 @@ as
             loop
                 fetch next from c_cni into rec_cni;
                 exit when rec_cni is null;
+
+                count := count + 1;
 
                 raise notice 'fetched next from cursor: pl_id = %, g_id = %, cn_id = %', rec_cni.pricelist_id, rec_cni.good_id, rec_cni.consignment_note_id;
                 raise notice 'good quantity = %', good_quantity;
