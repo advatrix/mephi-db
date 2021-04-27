@@ -69,10 +69,6 @@ as
             return;
         end if;
 
-        insert into "payment_document" (consignment_note_id, payment)
-        values (in_consignment_note_id, payment_sum)
-        returning id into new_payment_document_id;
-
         select sum(pi.price * cni.ordered) into total_consignment_cost
         from "consignment_note" cn
         join consignment_note_item cni on cn.id = cni.consignment_note_id
@@ -82,7 +78,7 @@ as
 
         raise notice 'Total consignment cost: %', total_consignment_cost;
 
-        select sum(pd.payment) into total_consignment_payment_sum
+        select coalesce(sum(pd.payment), 0) + payment_sum into total_consignment_payment_sum
         from "consignment_note" cn
         join payment_document pd on cn.id = pd.consignment_note_id
         where cn.id = in_consignment_note_id;
@@ -90,15 +86,24 @@ as
         raise notice 'Total consignment payment sum (including current payment): %', total_consignment_payment_sum;
 
         if total_consignment_payment_sum >= total_consignment_cost then
+
+            insert into "payment_document" (consignment_note_id, payment)
+            values (in_consignment_note_id, total_consignment_cost - total_consignment_payment_sum + payment_sum)
+            returning id into new_payment_document_id;
+
             update consignment_note
             set
                 paid = current_timestamp,
                 payment_document_id = new_payment_document_id
             where id = in_consignment_note_id;
 
-            result := 'Consignment note is fully paid. Here is your change';
+            result := 'Consignment note is fully paid';
+
         else
-            result := 'Success, left to pay:';
+            insert into "payment_document" (consignment_note_id, payment)
+            values (in_consignment_note_id, payment_sum);
+
+            result := 'Success';
         end if;
 
         debt := total_consignment_cost - total_consignment_payment_sum;
