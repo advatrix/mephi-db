@@ -169,3 +169,29 @@ from good g
         where cn.created >= current_date - interval '6 months'
         group by cni.good_id
     ) as income_info on income_info.good_id = g.id;
+
+
+select
+    p.id as "pricelist id",
+    p.category_id as "category id",
+    p.created as "created",
+    coalesce(good_info.goods_count, 0) as "goods count",
+    coalesce(customer_info.customers_count, 0) as "customers count"
+from pricelist p
+    left join (
+        select
+            cni.pricelist_id as "pricelist_id",
+            count(distinct cni.good_id) as "goods_count"
+        from consignment_note_item cni
+        group by cni.pricelist_id
+    ) as good_info on good_info.pricelist_id = p.id
+    left join (
+        select
+            cn.pricelist_id as pricelist_id,
+            count(distinct cn.customer_id) as customers_count
+        from consignment_note cn
+        group by cn.pricelist_id
+    ) as customer_info on customer_info.pricelist_id = p.id
+where not exists(
+    select * from consignment_note where pricelist_id = p.id and current_date - created <= interval '6 months'
+)
