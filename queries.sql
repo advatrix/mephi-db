@@ -105,4 +105,67 @@ from customer c
             ) as payment_info on payment_info.cn_id = cn.id
         where cn.payment_document_id is null
         group by cn.customer_id
-    ) as unpaid_notes on unpaid_notes.customer_id = c.id;
+    ) as unpaid_notes on unpaid_notes.customer_id = c.id
+order by 12 desc;
+
+
+select
+    g.name as "name",
+    coalesce(pricelist_info.pi_count, 0) as "pricelists count",
+    coalesce(pricelist_info.avg_price, 0) as "average price",
+    coalesce(income_info.total_ordered, 0) as "total ordered",
+    coalesce(income_info.sales_count, 0) as "sales count",
+    coalesce(income_info.sales_income, 0) as "sales income",
+    coalesce(income_info.cancel_count, 0)  as "cancel count",
+    coalesce(income_info.total_canceled, 0) as "total canceled",
+    coalesce(income_info.lost_income, 0) as "lost income"
+from good g
+    left join (
+        select
+            sub.good_id as good_id,
+            count(sub) as pi_count,
+            avg(sub.price) as avg_price
+        from (
+            (
+                select
+                    pi.good_id as good_id,
+                    pi.price as price
+                from pricelist p
+                    join pricelist_item pi on p.id = pi.pricelist_id
+                where p.created >= current_date - interval '6 months'
+            ) union all (
+                select
+                    pi2.good_id as good_id,
+                    pi2.price as price
+                from pricelist p2
+                    join pricelist_item pi2 on p2.id = pi2.pricelist_id
+                where not exists(
+                    select * from pricelist p3 join pricelist_item pi3 on p3.id = pi3.pricelist_id
+                    where
+                        pi3.good_id = pi2.good_id
+                        and p3.created >= current_date - interval '6 months'
+                )
+                order by p2.created
+                limit 1
+            )
+        ) as sub
+        group by sub.good_id
+    ) as pricelist_info on pricelist_info.good_id = g.id
+    left join (
+        select
+            cni.good_id as good_id,
+            sum(case when not cn.is_canceled then 1 else 0 end) as sales_count,
+            sum(case when not cn.is_canceled then cni.ordered else 0 end) as total_ordered,
+            sum(case when not cn.is_canceled then coalesce(payment_sum.sum, 0) else 0 end) as sales_income,
+            sum(case when cn.is_canceled then 1 else 0 end) as cancel_count,
+            sum(case when cn.is_canceled then cni.ordered else 0 end) as total_canceled,
+            sum(case when cn.is_canceled then cni.ordered * pi.price else 0 end) as lost_income
+        from consignment_note_item cni
+            join consignment_note cn on cni.consignment_note_id = cn.id
+            join pricelist_item pi on pi.pricelist_id = cn.pricelist_id and pi.good_id = cni.good_id
+            left join (
+                select consignment_note_id, sum(payment) as sum from payment_document group by consignment_note_id
+            ) as payment_sum on payment_sum.consignment_note_id = cn.id
+        where cn.created >= current_date - interval '6 months'
+        group by cni.good_id
+    ) as income_info on income_info.good_id = g.id;
