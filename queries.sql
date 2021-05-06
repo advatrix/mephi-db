@@ -194,4 +194,59 @@ from pricelist p
     ) as customer_info on customer_info.pricelist_id = p.id
 where not exists(
     select * from consignment_note where pricelist_id = p.id and current_date - created <= interval '6 months'
-)
+);
+
+
+select
+    c.id as "customer id",
+    c.code as "customer code",
+    c.registered as "registration date",
+    l.inn as "inn",
+    l.payment_account as "payment account",
+    p.first_name as "first name",
+    p.second_name as "second name",
+    p.last_name as "last name",
+    c.type as "customer type",
+    cgipi.notes_count as "notes count",
+    coalesce(cgipi.goods_ordered, 0) as "goods ordered",
+    coalesce(cgipi.expected_income, 0) as "expected income",
+    coalesce(cgipi.canceled_notes, 0) as "canceled notes",
+    coalesce(cgipi.canceled_notes, 0) as "lost income",
+    coalesce(cgipi.expected_income, 0) - coalesce(already_paid, 0) as "debt"
+from customer c
+    left join legal l on c.id = l.id
+    left join person p on c.id = p.id
+    join (
+        select
+            cn.customer_id as customer_id,
+            count(cn) as notes_count,
+            sum(goods_info.goods_ordered) as goods_ordered,
+            sum(goods_info.expected_income) as expected_income,
+            sum(case when cn.is_canceled = true then 1 else 0 end) as canceled_notes,
+            sum(payment_info.already_paid) as already_paid,
+            sum(goods_info.lost_income) as lost_income
+        from consignment_note cn
+            left join (
+                select
+                    cni.consignment_note_id as cn_id,
+                    sum(case when not n.is_canceled then cni.ordered else 0 end) as goods_ordered,
+                    sum(case when not n.is_canceled then cni.ordered * pi.price else 0 end) as expected_income,
+                    sum(case when n.is_canceled then cni.ordered * pi.price else 0 end) as lost_income
+                from consignment_note_item cni
+                    join consignment_note n on cni.consignment_note_id = n.id
+                    join pricelist_item pi on cni.pricelist_id = pi.pricelist_id and cni.good_id = pi.good_id
+                where not n.is_canceled
+                group by cni.consignment_note_id
+            ) as goods_info on goods_info.cn_id = cn.id
+            left join (
+                select
+                    pd.consignment_note_id as cn_id,
+                    sum(pd.payment) as already_paid
+                from payment_document pd
+                group by pd.consignment_note_id
+            ) as payment_info on payment_info.cn_id = cn.id
+        group by cn.customer_id
+    ) as cgipi on cgipi.customer_id = c.id
+    where not exists(
+        select * from consignment_note where paid is not null and customer_id = c.id
+    )
