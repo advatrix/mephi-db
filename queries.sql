@@ -159,7 +159,7 @@ from pricelist p
         group by cn.pricelist_id
     ) as customer_info on customer_info.pricelist_id = p.id
 where not exists(
-    select * from consignment_note where pricelist_id = p.id and current_date - created <= interval '6 months'
+    select * from consignment_note where pricelist_id = p.id and current_timestamp - created <= interval '6 months'
 );
 
 
