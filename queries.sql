@@ -1,10 +1,42 @@
 -- compare this query with simply referring to count(customer) twice
 
+
+with
+    customers_info(pc_id, total_count, active_count) as (
+        select
+            c.pricelist_category_id,
+            count(c.id),
+            sum(case when exists(select * from consignment_note where customer_id = c.id and current_timestamp - created < interval '1 year') then 1 else 0 end)
+        from customer c
+        group by pricelist_category_id
+    ),
+    notes_info(pc_id, registered_count, canceled_count) as (
+        select
+            pc.id,
+            sum(case when cn.is_canceled = false then 1 else 0 end),
+            sum(case when cn.is_canceled = true then 1 else 0 end)
+        from pricelist_category pc
+            left join customer c on c.pricelist_category_id = pc.id
+            left join consignment_note cn on c.id = cn.customer_id
+        group by pc.id
+    )
+select
+    pc.id as "pricelist_category",
+    ni.registered_count as "notes registered",
+    ni.canceled_count as "notes canceled",
+    ci.active_count as "active customers",
+    ci.total_count as "total customers",
+    round(ci.active_count::decimal / (case when ci.total_count = 0 then 1 else ci.total_count end) * 100, 2) as "activity share, %"
+from pricelist_category pc
+    join customers_info ci on ci.pc_id = pc.id
+    join notes_info ni on ni.pc_id = pc.id;
+
+
 with
     active_customers(count, pc_id) as (
         select count(c.id), c.pricelist_category_id
         from customer c
-        where exists(select id from consignment_note where customer_id = c.id)
+        where exists(select id from consignment_note where customer_id = c.id and current_timestamp - created <= interval '1 year')
         group by c.pricelist_category_id
     ),
     total_customers(count, pc_id) as (
@@ -249,4 +281,20 @@ from customer c
     ) as cgipi on cgipi.customer_id = c.id
     where not exists(
         select * from consignment_note where paid is not null and customer_id = c.id
-    )
+    );
+
+
+select
+        c.pricelist_category_id,
+        count(c.id),
+        sum(case when exists(select * from consignment_note where customer_id = c.id and current_timestamp - created < interval '1 year') then 1 else 0 end)
+    from customer c
+    group by pricelist_category_id;
+
+select * from customer c cross join pricelist p;
+
+select
+            c.id as c_id,
+            exists(select * from consignment_note where customer_id = c.id and current_timestamp - created < interval '1 year') as is_active
+        from customer c
+
