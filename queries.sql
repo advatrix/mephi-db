@@ -30,24 +30,26 @@ from pricelist_category pc
 where ni.registered_count = (select max(registered_count) from notes_info);
 
 
-select
-    c.id as "customer id",
-    c.code as "customer code",
-    c.registered as "registration date",
-    l.inn as "inn",
-    l.payment_account as "payment account",
-    l.name as "name",
-    p.first_name as "first name",
-    p.second_name as "second name",
-    p.last_name as "last name",
-    c.type as "customer type",
-    coalesce(registered_count, 0) as "notes registered",
-    coalesce(potential_income, 0) as "potential income",
-    coalesce(canceled_count, 0) as "notes canceled",
-    coalesce(lost_income, 0) as "unearned income",
-    coalesce(unpaid_count, 0) as "notes unpaid",
-    coalesce(debt, 0) as "debt"
-from customer c
+with customers_info(c_id, c_code, c_registered, l_inn, l_pa, l_name, p_first_name, p_second_name, p_last_name, c_type,
+    notes_registered, potential_income, notes_canceled, unearned_income, notes_unpaid, debt) as (
+    select
+        c.id,
+        c.code,
+        c.registered,
+        l.inn,
+        l.payment_account,
+        l.name,
+        p.first_name,
+        p.second_name,
+        p.last_name,
+        c.type,
+        coalesce(registered_count, 0),
+        coalesce(potential_income, 0),
+        coalesce(canceled_count, 0),
+        coalesce(lost_income, 0),
+        coalesce(unpaid_count, 0),
+        coalesce(debt, 0)
+    from "customer" c
     left join legal l on c.id = l.id
     left join person p on c.id = p.id
     left join (
@@ -77,27 +79,65 @@ from customer c
             ) as payment_info on payment_info.cn_id = cn.id
         group by cn.customer_id
     ) as notes_info on notes_info.customer_id = c.id
-order by 13 desc;
+)
+select
+    ci.c_id as "customer id",
+    ci.c_code as "customer code",
+    ci.c_registered as "registration date",
+    ci.l_inn as "inn",
+    ci.l_pa as "payment account",
+    ci.l_name as "name",
+    ci.p_first_name as "first name",
+    ci.p_second_name as "second name",
+    ci.p_last_name as "last name",
+    ci.c_type as "customer type",
+    ci.notes_registered as "notes registered",
+    ci.potential_income as "potential income",
+    ci.notes_canceled as "notes canceled",
+    ci.unearned_income as "unearned income",
+    ci.notes_unpaid as "notes unpaid",
+    ci.debt as debt
+from customers_info ci
+where ci.notes_canceled = (select max(notes_canceled) from customers_info);
 
 
 select
-    g.id,
-    g.name as "name",
-    coalesce(pricelist_info.pi_count, 0) as "pricelists count",
-    coalesce(pricelist_info.avg_price, 0) as "average price",
-    coalesce(income_info.total_ordered, 0) as "total ordered",
-    coalesce(income_info.sales_count, 0) as "sales count",
-    coalesce(income_info.sales_income, 0) as "sales income",
-    coalesce(income_info.cancel_count, 0)  as "cancel count",
-    coalesce(income_info.total_canceled, 0) as "total canceled",
-    coalesce(income_info.lost_income, 0) as "lost income"
-from good g
-    left join (
-        select
-            sub.good_id as good_id,
-            count(sub) as pi_count,
-            avg(sub.price) as avg_price
-        from (
+        sub.good_id,
+        sub.price
+    from (
+            (
+                select
+                    pi.good_id as good_id,
+                    pi.price as price
+                from good g
+                    join pricelist_item pi on g.id = pi.good_id
+                    join pricelist p on pi.pricelist_id = p.id
+                where p.created > current_date - interval '6 months'
+            ) union all (
+                select
+                    pi2.good_id as good_id,
+                    pi2.price as price
+                from good g2
+                    join pricelist_item pi2 on g2.id = pi2.good_id
+                    join pricelist p2 on pi2.pricelist_id = p2.id
+                where p2.created = (select max(created) from pricelist where created <= current_date - interval '6 months' and id = pi2.pricelist_id)
+            )
+        ) as sub;
+
+select * from pricelist_item where good_id = 2;
+
+select
+    good_id,
+    price,
+    avg(price)
+from pricelist_item
+group by good_id, price;
+
+with pricelist_info (good_id, price) as (
+    select
+        sub.good_id,
+        sub.price
+    from (
             (
                 select
                     pi.good_id as good_id,
@@ -116,8 +156,36 @@ from good g
                 where p2.created = (select max(created) from pricelist where created <= current_date - interval '6 months' and id = pi2.pricelist_id)
             )
         ) as sub
-        group by sub.good_id
+)
+select
+    g.id,
+    g.name as "name",
+    coalesce(pricelist_info.pi_count, 0) as "pricelists count",
+    coalesce(price_info.avg_price, 0) as "average price",
+    coalesce(income_info.total_ordered, 0) as "total ordered",
+    coalesce(income_info.sales_count, 0) as "sales count",
+    coalesce(income_info.sales_income, 0) as "sales income",
+    coalesce(income_info.cancel_count, 0)  as "cancel count",
+    coalesce(income_info.total_canceled, 0) as "total canceled",
+    coalesce(income_info.lost_income, 0) as "lost income"
+from good g
+    left join (
+        select
+            pi.good_id as good_id,
+            count(pi) as pi_count
+        from pricelist_info pi
+        group by pi.good_id
     ) as pricelist_info on pricelist_info.good_id = g.id
+    left join (
+        select
+            pi.good_id as good_id,
+            round(avg(sub.price), 2) as avg_price
+        from pricelist_info pi
+        left join (
+            select pi1.good_id, pi1.price from pricelist_info pi1 group by pi1.good_id, pi1.price
+        ) as sub on sub.good_id = pi.good_id
+        group by pi.good_id
+    ) as price_info on price_info.good_id = g.id
     left join (
         select
             cni.good_id as good_id,
