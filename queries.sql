@@ -1,5 +1,3 @@
--- compare this query with left joining sub query
-
 with
     customers_info(pc_id, total_count, active_count) as (
         select
@@ -16,7 +14,7 @@ with
             sum(case when cn.is_canceled = true then 1 else 0 end)
         from pricelist_category pc
             left join customer c on c.pricelist_category_id = pc.id
-            left join consignment_note cn on c.id = cn.customer_id
+            left join consignment_note cn on c.id = cn.customer_id and current_timestamp - cn.created < interval '1 year'
         group by pc.id
     )
 select
@@ -29,7 +27,7 @@ select
 from pricelist_category pc
     join customers_info ci on ci.pc_id = pc.id
     join notes_info ni on ni.pc_id = pc.id
-order by 2 desc, 3 desc, 4 desc, 5 desc, 6 desc;
+where ni.registered_count = (select max(registered_count) from notes_info);
 
 
 select

@@ -31,6 +31,34 @@ from pricelist_category pc
     join customers_info ci on ci.pc_id = pc.id
     join notes_info ni on ni.pc_id = pc.id
 order by 2 desc, 3 desc, 4 desc, 5 desc, 6 desc;
+select
+    pc.id as "pricelist_category",
+    ni.registered_count as "notes registered",
+    ni.canceled_count as "notes canceled",
+    ci.active_count as "active customers",
+    ci.total_count as "total customers",
+    round(ci.active_count::decimal / (case when ci.total_count = 0 then 1 else ci.total_count end) * 100, 2) as "activity share, %"
+from pricelist_category pc
+    left join (
+        select
+            c.pricelist_category_id as pc_id,
+            count(c.id) as total_count,
+            sum(case when exists(select * from consignment_note where customer_id = c.id and current_timestamp - created < interval '1 year') then 1 else 0 end) as active_count
+        from customer c
+        group by pricelist_category_id
+    ) as ci on ci.pc_id = pc.id
+    left join (
+        select
+            pc.id as pc_id,
+            sum(case when cn.is_canceled = false then 1 else 0 end) as registered_count,
+            sum(case when cn.is_canceled = true then 1 else 0 end) as canceled_count
+        from pricelist_category pc
+            left join customer c on c.pricelist_category_id = pc.id
+            left join consignment_note cn on c.id = cn.customer_id
+        group by pc.id
+    ) as ni on ni.pc_id = pc.id
+order by 2 desc, 3 desc, 4 desc, 5 desc, 6 desc;
+
 
 /*
 
